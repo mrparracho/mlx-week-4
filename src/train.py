@@ -210,7 +210,8 @@ def train_model(
     save_dir: str = "checkpoints",
     compute_eval_metrics: bool = True,
     test_dataset = None,
-    test_samples_per_epoch: int = 3
+    test_samples_per_epoch: int = 3,
+    test_metrics: bool = True
 ):
     """
     Train the image captioning model.
@@ -351,7 +352,7 @@ def train_model(
         if test_dataset and test_samples_per_epoch > 0:
             test_results = test_model_on_random_samples_during_training(
                 model, test_dataset, device, test_samples_per_epoch, 
-                compute_metrics=not args.no_test_metrics
+                compute_metrics=test_metrics
             )
             print(f"Test Results after Epoch {epoch+1}:")
             for metric_name, score in test_results.items():
@@ -787,7 +788,8 @@ def main():
         device=device,
         compute_eval_metrics=compute_eval_metrics,
         test_dataset=test_dataset if not args.no_test else None,
-        test_samples_per_epoch=args.test_samples_per_epoch
+        test_samples_per_epoch=args.test_samples_per_epoch,
+        test_metrics=not args.no_test_metrics
     )
     
     print("Training completed!")

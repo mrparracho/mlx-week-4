@@ -61,6 +61,11 @@ class FlickrDataset(Dataset):
             ]
         
         print(f"Loaded {len(self.captions_data)} samples for {split} split")
+        
+        # Precompute tokenized captions if tokenizer is provided
+        if self.tokenizer is not None:
+            for item in self.captions_data:
+                item['caption_tokens'] = self._process_caption(item['caption'])
     
     def _load_captions(self) -> List[Dict]:
         """Load captions from JSON file."""
@@ -116,8 +121,8 @@ class FlickrDataset(Dataset):
         # Get caption
         caption = item['caption']
         
-        # Process caption if tokenizer is available
-        caption_tokens = self._process_caption(caption)
+        # Use precomputed tokens if available
+        caption_tokens = item.get('caption_tokens', torch.tensor([]))
         
         return image, caption, caption_tokens
     

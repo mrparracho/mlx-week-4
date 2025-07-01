@@ -58,6 +58,12 @@ install_uv() {
     if ! command -v uv >/dev/null 2>&1; then
         print_status "Installing uv..."
         curl -LsSf https://astral.sh/uv/install.sh | sh
+        
+        # Add uv to PATH if it was installed to ~/.local/bin
+        if [[ -f "$HOME/.local/bin/uv" ]]; then
+            export PATH="$HOME/.local/bin:$PATH"
+            print_status "Added ~/.local/bin to PATH"
+        fi
     fi
     print_success "uv is ready"
 }
