@@ -4,20 +4,25 @@ This project uses `uv` as the package manager for fast and reliable Python depen
 
 ## Setup
 
-1. Install `uv` if you haven't already:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+### Recommended (one line):
 
-2. Create a virtual environment and install dependencies:
-   ```bash
-   uv sync
-   ```
+```bash
+./setup.sh            # Flickr30k (default)
+./setup.sh coco       # COCO dataset
+./setup.sh flickr8k   # Flickr8k dataset
+./setup.sh coco 500   # COCO, limit to 500 images
+```
 
-3. Activate the virtual environment:
-   ```bash
-   source .venv/bin/activate
-   ```
+This installs dependencies, detects your GPU, downloads the dataset, and shows the training command.
+
+---
+
+*Manual setup:*
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync
+uv run python scripts/download_flickr30k.py
+```
 
 ## Development
 
