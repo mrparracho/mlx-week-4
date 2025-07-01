@@ -29,7 +29,7 @@ print_cmd() {
 check_gpu() {
     if command -v nvidia-smi >/dev/null 2>&1; then
         echo "cuda"
-    elif [[ "$OSTYPE" == "darwin"* ]] && [[ $(uname -m) == "arm64" ]]; then
+    elif [ "$OSTYPE" = "darwin"* ] && [ "$(uname -m)" = "arm64" ]; then
         echo "mps"
     else
         echo "cpu"
@@ -59,10 +59,18 @@ install_uv() {
         print_status "Installing uv..."
         curl -LsSf https://astral.sh/uv/install.sh | sh
         
-        # Add uv to PATH if it was installed to ~/.local/bin
-        if [[ -f "$HOME/.local/bin/uv" ]]; then
+        # Add uv to PATH - try multiple common locations
+        if [ -f "$HOME/.local/bin/uv" ]; then
             export PATH="$HOME/.local/bin:$PATH"
             print_status "Added ~/.local/bin to PATH"
+        elif [ -f "/root/.local/bin/uv" ]; then
+            export PATH="/root/.local/bin:$PATH"
+            print_status "Added /root/.local/bin to PATH"
+        fi
+        
+        # Source shell profile to ensure PATH is updated
+        if [ -f "$HOME/.bashrc" ]; then
+            source "$HOME/.bashrc" 2>/dev/null || true
         fi
     fi
     print_success "uv is ready"
