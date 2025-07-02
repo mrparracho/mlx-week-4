@@ -25,6 +25,7 @@ dependencies = [
     "nltk>=3.9.1",
     "rouge-score>=0.1.2",
     "huggingface-hub>=0.33.1",
+    "wandb>=0.17.0",
 ]
 
 [project.optional-dependencies]

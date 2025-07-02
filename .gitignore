@@ -3,6 +3,8 @@ checkpoints/
 logs/
 .DS_Store
 .env
+wandb/
+.log
 
 # Python
 __pycache__/

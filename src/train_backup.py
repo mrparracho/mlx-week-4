@@ -16,7 +16,6 @@ from typing import Optional
 import json
 from tqdm import tqdm
 import numpy as np
-import pandas as pd
 
 # For evaluation metrics
 try:
@@ -124,16 +123,12 @@ def log_to_wandb(metrics: dict, step: int | None = None, prefix: str = ""):
         if prefix:
             metrics = {f"{prefix}/{k}": v for k, v in metrics.items()}
         
-        print(f"🔍 Logging to W&B: {metrics}")  # Debug line
-        
         if step is not None:
             wandb.log(metrics, step=step)
         else:
             wandb.log(metrics)
     except Exception as e:
         print(f"Warning: Failed to log to W&B: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def finish_wandb():
@@ -856,11 +851,6 @@ def log_model_checkpoint_to_wandb(checkpoint_path: str, epoch: int, save_criteri
     if not WANDB_AVAILABLE or not wandb.run:
         return
     
-    # Check if the checkpoint file actually exists
-    if not os.path.exists(checkpoint_path):
-        print(f"Warning: Checkpoint file not found, skipping W&B upload: {checkpoint_path}")
-        return
-    
     try:
         # Create checkpoint artifact
         artifact = wandb.Artifact(
@@ -896,8 +886,6 @@ def log_model_checkpoint_to_wandb(checkpoint_path: str, epoch: int, save_criteri
         
     except Exception as e:
         print(f"Warning: Failed to log model checkpoint to W&B: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def log_test_images_to_wandb(test_samples: list, epoch: int, step: int | None = None):
@@ -938,25 +926,28 @@ def log_test_images_to_wandb(test_samples: list, epoch: int, step: int | None = 
             
             test_data.append(row_data)
         
-        # Convert to pandas DataFrame
-        df = pd.DataFrame(test_data)
-        
         # Log as a table
         if step is not None:
             wandb.log({
-                f"test_samples_epoch_{epoch}": wandb.Table(dataframe=df)
+                f"test_samples_epoch_{epoch}": wandb.Table(
+                    dataframe=test_data,
+                    columns=["sample_id", "image", "reference_caption", "generated_caption"] + 
+                           [f"metric_{k.lower()}" for k in (test_samples[0]['metrics'].keys() if test_samples[0]['metrics'] else [])]
+                )
             }, step=step)
         else:
             wandb.log({
-                f"test_samples_epoch_{epoch}": wandb.Table(dataframe=df)
+                f"test_samples_epoch_{epoch}": wandb.Table(
+                    dataframe=test_data,
+                    columns=["sample_id", "image", "reference_caption", "generated_caption"] + 
+                           [f"metric_{k.lower()}" for k in (test_samples[0]['metrics'].keys() if test_samples[0]['metrics'] else [])]
+                )
             })
         
         print(f"📸 Logged {len(test_samples)} test samples to W&B for epoch {epoch}")
         
     except Exception as e:
         print(f"Warning: Failed to log test images to W&B: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def test_model_on_random_samples_during_training(

@@ -83,14 +83,102 @@ python src/train.py --data-dir data/flickr30k --no-eval
 
 # Train and save to Hugging Face Hub
 python src/train.py --data-dir data/flickr30k --save-to-hf "your-username/image-captioning-model"
+
+# Train with specific evaluation strategy
+python src/train.py --data-dir data/flickr30k --eval-strategy weighted-composite
+
+# Train with W&B logging (includes test images and model checkpoints)
+python src/train.py --data-dir data/flickr30k --wandb --wandb-project "my-captioning-experiment"
 ```
+
+#### Model Saving Strategy
+
+The training script now saves **two separate best models**:
+
+1. **`best_model_loss.pth`**: Best model based on validation loss improvement
+2. **`best_model_eval.pth`**: Best model based on evaluation metrics (BLEU, METEOR, etc.)
+
+This allows you to choose the most appropriate model for your use case:
+- Use `best_model_eval.pth` for production (optimized for caption quality)
+- Use `best_model_loss.pth` for debugging (lowest training loss)
+- Compare both models to understand the trade-offs
+
+Available evaluation strategies:
+- `meteor-centric` (default): Focus on METEOR score with tolerance for other metrics
+- `weighted-composite`: Balanced optimization across multiple metrics
+- `pareto`: Conservative approach ensuring no metric degradation
+- `multi-criteria`: Primary metric focus with flexibility
+- Single metric: `meteor`, `bleu`, `rouge`
+
+See [EVALUATION_STRATEGIES.md](EVALUATION_STRATEGIES.md) for detailed explanations.
+
+#### Weights & Biases Integration
+
+When using `--wandb`, the training script provides comprehensive logging:
+
+**📊 Metrics Tracking:**
+- Training and validation loss
+- Evaluation metrics (BLEU, METEOR, ROUGE)
+- Best model metrics over time
+
+**🖼️ Test Images:**
+- Sample images with generated vs reference captions
+- Individual metrics for each test sample
+- Visual progress tracking across epochs
+
+**📦 Model Checkpoints:**
+- Automatic artifact logging for all saved models
+- Metadata including save criteria and performance metrics
+- Easy model versioning and comparison
+
+**📈 Tables and Visualizations:**
+- Interactive tables showing test samples with captions
+- Model performance comparisons
+- Training progress dashboards
+
+Example W&B dashboard will show:
+- **Charts**: Loss curves, metric trends
+- **Tables**: Test samples with images and captions
+- **Artifacts**: Model checkpoints with metadata
+- **Media**: Generated captions with reference comparisons
 
 ### Inference
 
 Generate captions for images:
 
 ```bash
+# Use evaluation-based model (recommended for production)
+python src/infer.py --checkpoint checkpoints/best_model_eval.pth --image path/to/image.jpg
+
+# Use loss-based model
+python src/infer.py --checkpoint checkpoints/best_model_loss.pth --image path/to/image.jpg
+
+# Legacy: use old best_model.pth if it exists
 python src/infer.py --checkpoint checkpoints/best_model.pth --image path/to/image.jpg
+```
+
+#### Loading Models Programmatically
+
+You can also load models programmatically using the new helper functions:
+
+```python
+from src.train import ImageCaptioningModel, load_best_model, list_available_models
+
+# List available models
+models_info = list_available_models("checkpoints")
+print("Available models:", models_info)
+
+# Load evaluation-based model (recommended)
+model = ImageCaptioningModel()
+model, metadata = load_best_model(model, "checkpoints", model_type="eval")
+
+# Load loss-based model
+model = ImageCaptioningModel()
+model, metadata = load_best_model(model, "checkpoints", model_type="loss")
+
+# Auto-select best available model
+model = ImageCaptioningModel()
+model, metadata = load_best_model(model, "checkpoints", model_type="auto")
 ```
 
 ### Evaluation
@@ -98,7 +186,15 @@ python src/infer.py --checkpoint checkpoints/best_model.pth --image path/to/imag
 Evaluate model performance:
 
 ```bash
-python src/evaluate.py --checkpoint checkpoints/best_model.pth --data-dir data/flickr30k
+# Evaluate evaluation-based model
+python src/evaluate.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
+
+# Evaluate loss-based model
+python src/evaluate.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
+
+# Compare both models
+python src/evaluate.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
+python src/evaluate.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
 ```
 
 ### Testing
@@ -106,17 +202,38 @@ python src/evaluate.py --checkpoint checkpoints/best_model.pth --data-dir data/f
 Test the model on random samples with visualization:
 
 ```bash
-# Test on 3 random samples from train split
-python src/test_model.py --checkpoint checkpoints/best_model.pth --data-dir data/flickr30k
+# Test evaluation-based model (recommended)
+python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
+
+# Test loss-based model
+python src/test_model.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
 
 # Test on more samples
-python src/test_model.py --checkpoint checkpoints/best_model.pth --num-samples 5
+python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --num-samples 5
 
 # Test on a different split (if available)
-python src/test_model.py --checkpoint checkpoints/best_model.pth --split val
+python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --split val
 
 # Don't save the plot
-python src/test_model.py --checkpoint checkpoints/best_model.pth --no-plot
+python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --no-plot
+```
+
+### Model Management
+
+Use the new model utilities to manage and compare your saved models:
+
+```bash
+# Compare available models
+python src/model_utils.py --action compare
+
+# List all available models
+python src/model_utils.py --action list
+
+# Load and test a model
+python src/model_utils.py --action load --model-type eval --test-image path/to/image.jpg
+
+# Load loss-based model
+python src/model_utils.py --action load --model-type loss
 ```
 
 ## Saving to Hugging Face Hub
@@ -274,3 +391,17 @@ python scripts/download_flickr8k.py
 - Verify your dataset format
 - Ensure all dependencies are installed
 - Try with a smaller dataset first 
+
+### Testing W&B Integration
+
+Test the W&B logging functionality:
+
+```bash
+# Test W&B image and checkpoint logging (requires WANDB_API_KEY)
+python src/test_wandb_logging.py
+
+# Set up W&B API key first
+export WANDB_API_KEY="your-api-key"
+# or
+wandb login
+``` 
