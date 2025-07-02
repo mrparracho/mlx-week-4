@@ -208,13 +208,26 @@ def should_save_model_meteor_centric(current_metrics: dict, best_metrics: dict) 
     """
     Save model based on METEOR-centric evaluation with tolerance for other metrics.
     """
-    if 'METEOR' not in current_metrics or 'METEOR' not in best_metrics:
+    if 'METEOR' not in current_metrics:
+        print(f"⚠️  METEOR not found in current metrics: {list(current_metrics.keys())}")
+        return False
+    
+    # If best_metrics is empty (first epoch), always save
+    if not best_metrics:
+        print(f"✅ First epoch - saving model with METEOR: {current_metrics['METEOR']:.4f}")
+        return True
+    
+    if 'METEOR' not in best_metrics:
+        print(f"⚠️  METEOR not found in best metrics: {list(best_metrics.keys())}")
         return False
     
     meteor_improvement = current_metrics['METEOR'] - best_metrics['METEOR']
     
+    print(f"🔍 METEOR-centric check: current={current_metrics['METEOR']:.4f}, best={best_metrics['METEOR']:.4f}, improvement={meteor_improvement:.4f}")
+    
     # Direct METEOR improvement
     if meteor_improvement > 0:
+        print(f"✅ Direct METEOR improvement: {meteor_improvement:.4f}")
         return True
     
     # Small METEOR decrease but good overall performance
@@ -223,10 +236,14 @@ def should_save_model_meteor_centric(current_metrics: dict, best_metrics: dict) 
         bleu4_improvement = current_metrics.get('BLEU-4', 0) - best_metrics.get('BLEU-4', 0)
         rouge_improvement = current_metrics.get('ROUGE-L', 0) - best_metrics.get('ROUGE-L', 0)
         
+        print(f"🔍 Compensation check: BLEU-4 improvement={bleu4_improvement:.4f}, ROUGE-L improvement={rouge_improvement:.4f}")
+        
         # Save if other metrics improved significantly
         if bleu4_improvement > 0.01 or rouge_improvement > 0.02:
+            print(f"✅ Compensating improvement: BLEU-4={bleu4_improvement:.4f}, ROUGE-L={rouge_improvement:.4f}")
             return True
     
+    print(f"❌ No METEOR-centric improvement found")
     return False
 
 
@@ -234,10 +251,29 @@ def should_save_model_single_metric(current_metrics: dict, best_metrics: dict, m
     """
     Save model based on a single metric improvement.
     """
-    if metric_name not in current_metrics or metric_name not in best_metrics:
+    if metric_name not in current_metrics:
+        print(f"⚠️  {metric_name} not found in current metrics: {list(current_metrics.keys())}")
         return False
     
-    return current_metrics[metric_name] > best_metrics[metric_name]
+    # If best_metrics is empty (first epoch), always save
+    if not best_metrics:
+        print(f"✅ First epoch - saving model with {metric_name}: {current_metrics[metric_name]:.4f}")
+        return True
+    
+    if metric_name not in best_metrics:
+        print(f"⚠️  {metric_name} not found in best metrics: {list(best_metrics.keys())}")
+        return False
+    
+    improvement = current_metrics[metric_name] - best_metrics[metric_name]
+    print(f"🔍 {metric_name} check: current={current_metrics[metric_name]:.4f}, best={best_metrics[metric_name]:.4f}, improvement={improvement:.4f}")
+    
+    should_save = current_metrics[metric_name] > best_metrics[metric_name]
+    if should_save:
+        print(f"✅ {metric_name} improvement: {improvement:.4f}")
+    else:
+        print(f"❌ No {metric_name} improvement")
+    
+    return should_save
 
 
 def determine_model_save(eval_metrics: dict, best_metrics: dict, eval_strategy: str) -> tuple[bool, str]:
@@ -253,7 +289,12 @@ def determine_model_save(eval_metrics: dict, best_metrics: dict, eval_strategy: 
         tuple: (should_save, reason)
     """
     if not eval_metrics:
+        print("⚠️  No evaluation metrics available")
         return False, "No evaluation metrics available"
+    
+    print(f"🔍 Model save check - Strategy: {eval_strategy}")
+    print(f"   Current metrics: {eval_metrics}")
+    print(f"   Best metrics: {best_metrics}")
     
     if eval_strategy == "weighted-composite":
         current_score = compute_composite_score(eval_metrics)
@@ -270,6 +311,7 @@ def determine_model_save(eval_metrics: dict, best_metrics: dict, eval_strategy: 
         reason = "Multi-criteria improvement achieved"
         
     elif eval_strategy == "meteor-centric":
+        print(f"🔍 Calling should_save_model_meteor_centric with eval_strategy: {eval_strategy}")
         should_save = should_save_model_meteor_centric(eval_metrics, best_metrics)
         reason = "METEOR-centric improvement achieved"
         
@@ -389,7 +431,7 @@ class ImageCaptioningModel(nn.Module):
         
         return outputs
     
-    def generate_caption(self, image, max_length=50, num_beams=5):
+    def generate_caption(self, image, max_length=50, num_beams=5, temperature=0.8):
         """Generate caption for a single image."""
         self.eval()
         
@@ -405,7 +447,7 @@ class ImageCaptioningModel(nn.Module):
             bos_token_id=self.tokenizer.bos_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
             do_sample=True,
-            temperature=0.8,  # Slightly higher temperature
+            temperature=temperature,  # Now configurable
             top_p=0.9,
             no_repeat_ngram_size=2,  # Avoid repetition
             repetition_penalty=1.1  # Slight penalty for repetition
@@ -485,6 +527,8 @@ def train_model(
     global_step = 0
     
     for epoch in range(num_epochs):
+        print(f"\n🔄 Starting Epoch {epoch+1}/{num_epochs}")
+        print(f"📊 Current best_metrics: {best_metrics}")
         model.train()
         total_loss = 0
         num_batches = 0
@@ -598,6 +642,47 @@ def train_model(
                 # Log evaluation metrics to wandb
                 if wandb_initialized:
                     log_to_wandb(eval_metrics, step=global_step, prefix="eval")
+                
+                # Check for evaluation-based improvement
+                should_save_eval, reason = determine_model_save(eval_metrics, best_metrics, eval_strategy)
+                
+                if should_save_eval:
+                    best_metrics = eval_metrics.copy()
+                    print(f"✅ New best model based on {eval_strategy}! Reason: {reason}")
+                    print(f"📊 Updated best_metrics: {best_metrics}")
+                else:
+                    print(f"❌ No evaluation-based improvement. Reason: {reason}")
+                    
+                    # Save evaluation-based best model
+                    eval_save_dict = {
+                        'epoch': epoch,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'val_loss': avg_val_loss,
+                        'save_criterion': f'evaluation_{eval_strategy}',
+                        'eval_metrics': eval_metrics,
+                        'best_metrics': best_metrics,
+                    }
+                    torch.save(eval_save_dict, os.path.join(save_dir, 'best_model_eval.pth'))
+                    print(f"Saved best model based on {eval_strategy} evaluation")
+                    
+                    # Log best metrics to wandb
+                    if wandb_initialized:
+                        for metric_name, score in eval_metrics.items():
+                            log_to_wandb({
+                                f"best/{metric_name.lower()}": score,
+                            }, step=global_step)
+                        
+                        # Log model checkpoint to wandb
+                        checkpoint_path = os.path.join(save_dir, 'best_model_eval.pth')
+                        log_model_checkpoint_to_wandb(
+                            checkpoint_path=checkpoint_path,
+                            epoch=epoch + 1,
+                            save_criterion=f'evaluation_{eval_strategy}',
+                            val_loss=avg_val_loss,
+                            eval_metrics=eval_metrics,
+                            step=global_step
+                        )
             
             # Always check for loss-based improvement and save if better
             loss_improved = avg_val_loss < best_val_loss
@@ -632,56 +717,6 @@ def train_model(
                         val_loss=avg_val_loss,
                         step=global_step
                     )
-            
-            # Compute evaluation metrics if requested
-            eval_metrics = {}
-            if compute_eval_metrics and val_dataloader is not None:
-                eval_metrics = evaluate_model_on_validation(model, val_dataloader, device, max_samples=50)
-                print(f"Evaluation Metrics:")
-                for metric_name, score in eval_metrics.items():
-                    print(f"  {metric_name}: {score:.4f}")
-                
-                # Log evaluation metrics to wandb
-                if wandb_initialized:
-                    log_to_wandb(eval_metrics, step=global_step, prefix="eval")
-                
-                # Check for evaluation-based improvement
-                should_save_eval, reason = determine_model_save(eval_metrics, best_metrics, eval_strategy)
-                
-                if should_save_eval:
-                    best_metrics = eval_metrics.copy()
-                    print(f"New best model based on {eval_strategy}! Reason: {reason}")
-                    
-                    # Save evaluation-based best model
-                    eval_save_dict = {
-                        'epoch': epoch,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'val_loss': avg_val_loss,
-                        'save_criterion': f'evaluation_{eval_strategy}',
-                        'eval_metrics': eval_metrics,
-                        'best_metrics': best_metrics,
-                    }
-                    torch.save(eval_save_dict, os.path.join(save_dir, 'best_model_eval.pth'))
-                    print(f"Saved best model based on {eval_strategy} evaluation")
-                    
-                    # Log best metrics to wandb
-                    if wandb_initialized:
-                        for metric_name, score in eval_metrics.items():
-                            log_to_wandb({
-                                f"best/{metric_name.lower()}": score,
-                            }, step=global_step)
-                        
-                        # Log model checkpoint to wandb
-                        checkpoint_path = os.path.join(save_dir, 'best_model_eval.pth')
-                        log_model_checkpoint_to_wandb(
-                            checkpoint_path=checkpoint_path,
-                            epoch=epoch + 1,
-                            save_criterion=f'evaluation_{eval_strategy}',
-                            val_loss=avg_val_loss,
-                            eval_metrics=eval_metrics,
-                            step=global_step
-                        )
         
         # Save checkpoint every few epochs
         if (epoch + 1) % 5 == 0:
@@ -835,7 +870,7 @@ def evaluate_model_on_validation(model: ImageCaptioningModel,
     # Average metrics
     avg_metrics = {}
     for metric_name in all_metrics[0].keys():
-        avg_metrics[metric_name] = np.mean([m[metric_name] for m in all_metrics])
+        avg_metrics[metric_name] = float(np.mean([m[metric_name] for m in all_metrics]))
     
     return avg_metrics
 

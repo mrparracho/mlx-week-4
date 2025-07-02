@@ -21,7 +21,10 @@ def test_model_on_random_samples(
     device: str,
     num_samples: int = 3,
     save_plot: bool = True,
-    plot_path: str = "test_results.png"
+    plot_path: str = "test_results.png",
+    temperature: float = 0.8,
+    max_length: int = 50,
+    num_beams: int = 5
 ):
     """
     Test the model on random samples from the dataset.
@@ -65,7 +68,12 @@ def test_model_on_random_samples(
                 image = transforms.ToPILImage()(image)
             
             # Generate caption
-            generated_caption = model.generate_caption(image)
+            generated_caption = model.generate_caption(
+                image, 
+                max_length=max_length, 
+                num_beams=num_beams, 
+                temperature=temperature
+            )
             
             # Display results
             print(f"\n📸 Sample {i+1}:")
@@ -110,6 +118,12 @@ def main():
                        help="Path to save the plot")
     parser.add_argument("--no-plot", action="store_true",
                        help="Don't save the plot")
+    parser.add_argument("--temperature", type=float, default=0.8, 
+                       help="Temperature for text generation (0.1-2.0)")
+    parser.add_argument("--max-length", type=int, default=50, 
+                       help="Maximum caption length")
+    parser.add_argument("--num-beams", type=int, default=5, 
+                       help="Number of beams for beam search")
     
     args = parser.parse_args()
     
@@ -162,7 +176,10 @@ def main():
         device=device,
         num_samples=args.num_samples,
         save_plot=not args.no_plot,
-        plot_path=args.plot_path
+        plot_path=args.plot_path,
+        temperature=args.temperature,
+        max_length=args.max_length,
+        num_beams=args.num_beams
     )
 
 

@@ -9,7 +9,7 @@ import argparse
 import os
 from src.train import ImageCaptioningModel, select_device
 
-def debug_generate_caption(model, image, max_length=50, num_beams=5):
+def debug_generate_caption(model, image, max_length=50, num_beams=5, temperature=0.8):
     """Debug version of generate_caption with detailed output."""
     model.eval()
     
@@ -28,7 +28,7 @@ def debug_generate_caption(model, image, max_length=50, num_beams=5):
                 "num_beams": num_beams,
                 "early_stopping": False,  # Disable early stopping
                 "do_sample": True,
-                "temperature": 1.0,  # Higher temperature
+                "temperature": temperature,  # Use provided temperature
                 "top_p": 0.9,
                 "no_repeat_ngram_size": 0
             }
@@ -41,7 +41,7 @@ def debug_generate_caption(model, image, max_length=50, num_beams=5):
                 "num_beams": num_beams,
                 "early_stopping": False,
                 "do_sample": True,
-                "temperature": 1.0,
+                "temperature": temperature,  # Use provided temperature
                 "top_p": 0.9,
                 "no_repeat_ngram_size": 0
             }
@@ -54,7 +54,7 @@ def debug_generate_caption(model, image, max_length=50, num_beams=5):
                 "num_beams": 1,  # Greedy
                 "early_stopping": False,
                 "do_sample": False,
-                "temperature": 1.0,
+                "temperature": temperature,  # Use provided temperature
                 "top_p": 1.0
             }
         }
@@ -114,6 +114,7 @@ def main():
     parser.add_argument("--device", type=str, default=None, help="Device to use (cuda, mps, cpu)")
     parser.add_argument("--max-length", type=int, default=50, help="Maximum generation length")
     parser.add_argument("--num-beams", type=int, default=5, help="Number of beams for beam search")
+    parser.add_argument("--temperature", type=float, default=0.8, help="Temperature for text generation (0.1-2.0)")
     
     args = parser.parse_args()
     
@@ -144,7 +145,7 @@ def main():
     print(f"Image size: {image.size}")
     
     # Generate caption with debug info
-    caption = debug_generate_caption(model, image, args.max_length, args.num_beams)
+    caption = debug_generate_caption(model, image, args.max_length, args.num_beams, args.temperature)
     
     print(f"\n{'='*50}")
     print(f"FINAL RESULT: '{caption}'")

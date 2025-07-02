@@ -1,118 +1,162 @@
-# MLX Week 4 Project
+# Image Captioning with CLIP + GPT-2
 
-This project uses `uv` as the package manager for fast and reliable Python dependency management.
+A PyTorch implementation of an image captioning model using CLIP as the vision encoder and GPT-2 as the text decoder with cross-attention. This project supports multiple datasets, comprehensive evaluation metrics, and integration with Weights & Biases and Hugging Face Hub.
 
-## Setup
+## Features
 
-### Recommended (one line):
+- **CLIP Vision Encoder**: Uses OpenAI's CLIP model for robust image understanding
+- **GPT-2 Decoder**: Generates captions with cross-attention to image features
+- **Multiple Datasets**: Support for Flickr30k, COCO, and Flickr8k
+- **Comprehensive Evaluation**: BLEU, METEOR, ROUGE scores with multiple evaluation strategies
+- **Dual Model Saving**: Separate models for loss-based and evaluation-based optimization
+- **Generation Control**: Configurable temperature, beam search, and length parameters
+- **W&B Integration**: Complete logging of metrics, test images, and model checkpoints
+- **Hugging Face Hub**: Easy model sharing and deployment
+- **Cross-platform**: Supports CUDA, MPS (Apple Silicon), and CPU
+
+## Quickstart
+
+### 1. Setup
 
 ```bash
+# Clone and setup (recommended)
 ./setup.sh            # Flickr30k (default)
 ./setup.sh coco       # COCO dataset
 ./setup.sh flickr8k   # Flickr8k dataset
-./setup.sh coco 500   # COCO, limit to 500 images
-```
 
-This installs dependencies, detects your GPU, downloads the dataset, and shows the training command.
-
----
-
-*Manual setup:*
-```bash
+# Or manual setup
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 uv run python scripts/download_flickr30k.py
 ```
 
-## Development
+### 2. Train
 
-- Install development dependencies: `uv sync --dev`
-- Run tests: `uv run pytest`
-- Format code: `uv run black .`
-- Lint code: `uv run flake8 .`
-- Type check: `uv run mypy .`
+```bash
+# Basic training
+python -m src.train --data-dir data/flickr30k --num-epochs 10
 
-## Project Structure
+# With W&B logging and HF Hub saving
+python -m src.train \
+  --data-dir data/flickr30k \
+  --num-epochs 10 \
+  --wandb \
+  --wandb-project "my-captioning-experiment" \
+  --save-to-hf "your-username/image-captioning-model"
+```
 
-- `notebooks/` - Jupyter notebooks for MLX experiments
-- `pyproject.toml` - Project configuration and dependencies 
+### 3. Test (on training dataset samples)
 
-# Image Captioning with CLIP + GPT-2
+```bash
+# Test on random samples from the dataset
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --data-dir data/flickr30k \
+  --num-samples 5
 
-This project implements an image captioning model using CLIP as the vision encoder and GPT-2 as the text decoder with cross-attention.
+# Test with different generation parameters
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --temperature 1.2 \
+  --max-length 60 \
+  --num-beams 3
+```
 
-## Features
+### 4. Inference (on your own images)
 
-- **CLIP Vision Encoder**: Uses OpenAI's CLIP model for image understanding
-- **GPT-2 Decoder**: Generates captions with cross-attention to image features
-- **Multiple Datasets**: Support for Flickr30k, COCO, and Flickr8k
-- **Evaluation Metrics**: BLEU, METEOR, ROUGE, and CIDEr scores
-- **Hugging Face Integration**: Save and share models on Hugging Face Hub
-- **Cross-platform**: Supports CUDA, MPS (Apple Silicon), and CPU
+```bash
+# Basic inference
+python -m src.infer notebooks/my_image.jpg \
+  --checkpoint checkpoints/best_model_eval.pth
+
+# With custom generation parameters
+python -m src.infer notebooks/my_image.jpg \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --temperature 0.9 \
+  --max-length 50 \
+  --num-beams 5
+
+# Debug mode for troubleshooting
+python -m src.debug_infer notebooks/my_image.jpg \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --temperature 1.0
+```
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd mlx-week-4
-```
+### Prerequisites
 
-2. Install dependencies:
+- Python 3.8+
+- PyTorch 2.0+
+- CUDA (optional, for GPU acceleration)
+- MPS (optional, for Apple Silicon)
+
+### Dependencies
+
 ```bash
+# Core dependencies
 pip install torch torchvision transformers pillow tqdm
-pip install nltk rouge-score  # For evaluation metrics
-pip install huggingface_hub   # For saving to Hugging Face Hub
+
+# Evaluation metrics
+pip install nltk rouge-score
+
+# Optional: W&B and HF Hub
+pip install wandb huggingface_hub
 ```
 
-## Usage
+## Training
 
-### Training
-
-Train the model on your dataset:
+### Basic Training
 
 ```bash
 # Train on Flickr30k
-python src/train.py --data-dir data/flickr30k --batch-size 16 --num-epochs 10
+python -m src.train --data-dir data/flickr30k --batch-size 16 --num-epochs 10
 
 # Train on COCO
-python src/train.py --data-dir data/coco_captions --batch-size 16 --num-epochs 10
+python -m src.train --data-dir data/coco_captions --batch-size 16 --num-epochs 10
 
 # Train with evaluation metrics disabled
-python src/train.py --data-dir data/flickr30k --no-eval
-
-# Train and save to Hugging Face Hub
-python src/train.py --data-dir data/flickr30k --save-to-hf "your-username/image-captioning-model"
-
-# Train with specific evaluation strategy
-python src/train.py --data-dir data/flickr30k --eval-strategy weighted-composite
-
-# Train with W&B logging (includes test images and model checkpoints)
-python src/train.py --data-dir data/flickr30k --wandb --wandb-project "my-captioning-experiment"
+python -m src.train --data-dir data/flickr30k --no-eval
 ```
 
-#### Model Saving Strategy
+### Advanced Training Options
 
-The training script now saves **two separate best models**:
+```bash
+# Train with W&B logging
+python -m src.train \
+  --data-dir data/flickr30k \
+  --wandb \
+  --wandb-project "my-captioning-experiment" \
+  --wandb-run-name "clip-gpt2-v1"
+
+# Train and save to Hugging Face Hub
+python -m src.train \
+  --data-dir data/flickr30k \
+  --save-to-hf "your-username/image-captioning-model" \
+  --hf-token "your-hf-token" \
+  --hf-private
+
+# Train with specific evaluation strategy
+python -m src.train \
+  --data-dir data/flickr30k \
+  --eval-strategy meteor-centric
+```
+
+### Model Saving Strategy
+
+The training script saves **two separate best models**:
 
 1. **`best_model_loss.pth`**: Best model based on validation loss improvement
-2. **`best_model_eval.pth`**: Best model based on evaluation metrics (BLEU, METEOR, etc.)
+2. **`best_model_eval.pth`**: Best model based on evaluation metrics (recommended for production)
 
-This allows you to choose the most appropriate model for your use case:
-- Use `best_model_eval.pth` for production (optimized for caption quality)
-- Use `best_model_loss.pth` for debugging (lowest training loss)
-- Compare both models to understand the trade-offs
-
-Available evaluation strategies:
+**Evaluation Strategies:**
 - `meteor-centric` (default): Focus on METEOR score with tolerance for other metrics
 - `weighted-composite`: Balanced optimization across multiple metrics
 - `pareto`: Conservative approach ensuring no metric degradation
 - `multi-criteria`: Primary metric focus with flexibility
 - Single metric: `meteor`, `bleu`, `rouge`
 
-See [EVALUATION_STRATEGIES.md](EVALUATION_STRATEGIES.md) for detailed explanations.
-
-#### Weights & Biases Integration
+### Weights & Biases Integration
 
 When using `--wandb`, the training script provides comprehensive logging:
 
@@ -129,143 +173,156 @@ When using `--wandb`, the training script provides comprehensive logging:
 **📦 Model Checkpoints:**
 - Automatic artifact logging for all saved models
 - Metadata including save criteria and performance metrics
-- Easy model versioning and comparison
 
-**📈 Tables and Visualizations:**
-- Interactive tables showing test samples with captions
-- Model performance comparisons
-- Training progress dashboards
+## Inference
 
-Example W&B dashboard will show:
-- **Charts**: Loss curves, metric trends
-- **Tables**: Test samples with images and captions
-- **Artifacts**: Model checkpoints with metadata
-- **Media**: Generated captions with reference comparisons
-
-### Inference
-
-Generate captions for images:
+### Basic Inference
 
 ```bash
-# Use evaluation-based model (recommended for production)
-python src/infer.py --checkpoint checkpoints/best_model_eval.pth --image path/to/image.jpg
+# Use evaluation-based model (recommended)
+python -m src.infer notebooks/my_image.jpg \
+  --checkpoint checkpoints/best_model_eval.pth
 
 # Use loss-based model
-python src/infer.py --checkpoint checkpoints/best_model_loss.pth --image path/to/image.jpg
-
-# Legacy: use old best_model.pth if it exists
-python src/infer.py --checkpoint checkpoints/best_model.pth --image path/to/image.jpg
+python -m src.infer notebooks/my_image.jpg \
+  --checkpoint checkpoints/best_model_loss.pth
 ```
 
-#### Loading Models Programmatically
+### Generation Parameters
 
-You can also load models programmatically using the new helper functions:
+```bash
+# High temperature for more creative captions
+python -m src.infer notebooks/my_image.jpg \
+  --temperature 1.2 \
+  --max-length 60
+
+# Low temperature for more deterministic captions
+python -m src.infer notebooks/my_image.jpg \
+  --temperature 0.3 \
+  --num-beams 3
+
+# Debug mode for troubleshooting
+python -m src.debug_infer notebooks/my_image.jpg \
+  --temperature 1.0 \
+  --max-length 50
+```
+
+**Parameter Guide:**
+- `--temperature` (0.1-2.0): Controls randomness (higher = more creative)
+- `--max-length` (10-100): Maximum caption length
+- `--num-beams` (1-10): Beam search width (higher = better quality, slower)
+
+### Programmatic Usage
 
 ```python
-from src.train import ImageCaptioningModel, load_best_model, list_available_models
+from src.train import ImageCaptioningModel, load_best_model
+from PIL import Image
 
-# List available models
-models_info = list_available_models("checkpoints")
-print("Available models:", models_info)
-
-# Load evaluation-based model (recommended)
+# Load model
 model = ImageCaptioningModel()
 model, metadata = load_best_model(model, "checkpoints", model_type="eval")
 
-# Load loss-based model
-model = ImageCaptioningModel()
-model, metadata = load_best_model(model, "checkpoints", model_type="loss")
-
-# Auto-select best available model
-model = ImageCaptioningModel()
-model, metadata = load_best_model(model, "checkpoints", model_type="auto")
+# Generate caption
+image = Image.open("my_image.jpg")
+caption = model.generate_caption(
+    image, 
+    temperature=0.8, 
+    max_length=50, 
+    num_beams=5
+)
+print(caption)
 ```
 
-### Evaluation
+## Testing
 
-Evaluate model performance:
-
-```bash
-# Evaluate evaluation-based model
-python src/evaluate.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
-
-# Evaluate loss-based model
-python src/evaluate.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
-
-# Compare both models
-python src/evaluate.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
-python src/evaluate.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
-```
-
-### Testing
-
-Test the model on random samples with visualization:
+### Test on Dataset Samples
 
 ```bash
 # Test evaluation-based model (recommended)
-python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --data-dir data/flickr30k
-
-# Test loss-based model
-python src/test_model.py --checkpoint checkpoints/best_model_loss.pth --data-dir data/flickr30k
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --data-dir data/flickr30k
 
 # Test on more samples
-python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --num-samples 5
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --num-samples 5
 
-# Test on a different split (if available)
-python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --split val
+# Test on validation split
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --split val
 
-# Don't save the plot
-python src/test_model.py --checkpoint checkpoints/best_model_eval.pth --no-plot
+# Test with custom generation parameters
+python -m src.test_model \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --temperature 1.1 \
+  --max-length 60 \
+  --num-beams 3
 ```
 
 ### Model Management
 
-Use the new model utilities to manage and compare your saved models:
-
 ```bash
 # Compare available models
-python src/model_utils.py --action compare
+python -m src.model_utils --action compare
 
 # List all available models
-python src/model_utils.py --action list
+python -m src.model_utils --action list
 
 # Load and test a model
-python src/model_utils.py --action load --model-type eval --test-image path/to/image.jpg
-
-# Load loss-based model
-python src/model_utils.py --action load --model-type loss
+python -m src.model_utils \
+  --action load \
+  --model-type eval \
+  --test-image notebooks/my_image.jpg
 ```
 
-## Saving to Hugging Face Hub
+## Evaluation
 
-### During Training
-
-You can automatically save your model to Hugging Face Hub after training:
+### Evaluate Model Performance
 
 ```bash
-python src/train.py \
-    --data-dir data/flickr30k \
-    --save-to-hf "your-username/image-captioning-model" \
-    --hf-token "your-hf-token" \
-    --hf-private  # Optional: make repository private
+# Evaluate evaluation-based model
+python -m src.evaluate \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --data-dir data/flickr30k
+
+# Evaluate loss-based model
+python -m src.evaluate \
+  --checkpoint checkpoints/best_model_loss.pth \
+  --data-dir data/flickr30k
 ```
 
-### After Training
+### Evaluation Metrics
 
-Save an existing checkpoint to Hugging Face Hub:
+The model is evaluated using standard image captioning metrics:
+- **BLEU-1/2/3/4**: Measures n-gram overlap with reference captions
+- **METEOR**: Considers synonyms and word order
+- **ROUGE-L**: Measures longest common subsequence
+
+## Hugging Face Hub Integration
+
+### Save During Training
 
 ```bash
-python src/save_to_hf.py \
-    --checkpoint checkpoints/best_model.pth \
-    --repo-name "your-username/image-captioning-model" \
-    --token "your-hf-token" \
-    --commit-message "Add trained image captioning model" \
-    --private  # Optional: make repository private
+python -m src.train \
+  --data-dir data/flickr30k \
+  --save-to-hf "your-username/image-captioning-model" \
+  --hf-token "your-hf-token" \
+  --hf-private
 ```
 
-### Using Your Model
+### Save After Training
 
-Once uploaded, others can use your model:
+```bash
+python -m src.save_to_hf \
+  --checkpoint checkpoints/best_model_eval.pth \
+  --repo-name "your-username/image-captioning-model" \
+  --token "your-hf-token" \
+  --private
+```
+
+### Use Your Model
 
 ```python
 from transformers import AutoTokenizer, AutoModel
@@ -281,59 +338,41 @@ caption = model.generate_caption(image)
 print(caption)
 ```
 
-### Getting a Hugging Face Token
-
-1. Go to [Hugging Face](https://huggingface.co/)
-2. Create an account or sign in
-3. Go to Settings → Access Tokens
-4. Create a new token with "write" permissions
-5. Use this token with the `--hf-token` argument
-
 ## Environment Variables
 
-You can configure the model using environment variables for easier automation and CI/CD:
+Configure the model using environment variables:
 
-### Hugging Face Hub Variables
 ```bash
-# Required for uploading models
+# Hugging Face Hub
 export HUGGINGFACE_TOKEN="your-hf-token"
-
-# Optional: Auto-save to HF Hub during training
 export HF_REPO_NAME="your-username/image-captioning-model"
-
-# Optional: Commit message for uploads
-export HF_COMMIT_MESSAGE="Add trained image captioning model"
-
-# Optional: Make repositories private (true/false)
 export HF_PRIVATE="false"
-```
 
-### Training Variables
-```bash
-# Device selection
-export DEVICE="cuda"  # or "mps", "cpu"
+# Weights & Biases
+export WANDB_API_KEY="your-wandb-api-key"
+export WANDB_PROJECT="my-captioning-project"
+export WANDB_RUN_NAME="experiment-1"
 
-# Data directory
+# Training
+export DEVICE="cuda"
 export DATA_DIR="data/flickr30k"
-
-# Training parameters
 export BATCH_SIZE="16"
 export NUM_EPOCHS="10"
-export LEARNING_RATE="1e-4"
 ```
 
-### Example Usage with Environment Variables
+## Dataset Preparation
+
+### Available Datasets
+
 ```bash
-# Set up environment
-export HUGGINGFACE_TOKEN="your-token"
-export HF_REPO_NAME="your-username/image-captioning-model"
-export HF_PRIVATE="false"
+# Flickr30k (default)
+python scripts/download_flickr30k.py
 
-# Train and auto-save to HF Hub
-python src/train.py --data-dir data/flickr30k
+# COCO
+python scripts/download_coco_captions.py
 
-# Save existing checkpoint
-python src/save_to_hf.py --checkpoint checkpoints/best_model.pth --repo-name "your-username/model"
+# Flickr8k
+python scripts/download_flickr8k.py
 ```
 
 ## Model Architecture
@@ -342,39 +381,6 @@ The model consists of:
 - **CLIP Vision Encoder**: Extracts image features using CLIP's vision transformer
 - **Cross-Attention**: GPT-2 decoder attends to image features during text generation
 - **Projection Layer**: Maps CLIP features to GPT-2 hidden dimension (if needed)
-
-## Evaluation Metrics
-
-The model is evaluated using standard image captioning metrics:
-- **BLEU-1/2/3/4**: Measures n-gram overlap with reference captions
-- **METEOR**: Considers synonyms and word order
-- **ROUGE-L**: Measures longest common subsequence
-- **CIDEr**: TF-IDF weighted n-gram similarity
-
-## Dataset Preparation
-
-### Flickr30k
-```bash
-python scripts/download_flickr30k.py
-```
-
-### COCO
-```bash
-python scripts/download_coco_captions.py
-```
-
-### Flickr8k
-```bash
-python scripts/download_flickr8k.py
-```
-
-## Training Tips
-
-1. **Start Small**: Begin with a small dataset to test your setup
-2. **Monitor Metrics**: Use evaluation metrics to track progress
-3. **Adjust Parameters**: Experiment with learning rate, batch size, and epochs
-4. **Save Checkpoints**: Regular checkpoints help resume training
-5. **Use GPU**: Training is much faster with CUDA or MPS
 
 ## Troubleshooting
 
@@ -385,23 +391,44 @@ python scripts/download_flickr8k.py
 3. **Slow Training**: Use GPU acceleration or reduce model complexity
 4. **Import Errors**: Install missing dependencies with pip
 
-### Getting Help
-
-- Check the logs for error messages
-- Verify your dataset format
-- Ensure all dependencies are installed
-- Try with a smaller dataset first 
-
 ### Testing W&B Integration
 
-Test the W&B logging functionality:
-
 ```bash
-# Test W&B image and checkpoint logging (requires WANDB_API_KEY)
-python src/test_wandb_logging.py
+# Test W&B logging functionality
+python -m src.test_wandb_logging
 
 # Set up W&B API key first
 export WANDB_API_KEY="your-api-key"
 # or
 wandb login
-``` 
+```
+
+### Getting Help
+
+- Check the logs for error messages
+- Verify your dataset format
+- Ensure all dependencies are installed
+- Try with a smaller dataset first
+
+## Development
+
+```bash
+# Install development dependencies
+uv sync --dev
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run black .
+
+# Lint code
+uv run flake8 .
+
+# Type check
+uv run mypy .
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
