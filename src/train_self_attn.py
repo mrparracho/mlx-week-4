@@ -1979,10 +1979,14 @@ def main():
         transforms.ToTensor()
     ])
     
+    # Create datasets first (needed for both models)
     if args.self_attn:
         print("\n*** Using SELF-ATTENTION model ***\n")
         print(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
         print(f"Effective batch size: {batch_size * args.gradient_accumulation_steps}")
+        
+        # Create model first to get tokenizer
+        model = ImageCaptioningModelSelfAttention()
         
         # Automatically reduce batch size for self-attention to prevent OOM
         if batch_size > 8:
@@ -1990,33 +1994,11 @@ def main():
             batch_size = min(8, batch_size // 2)
             print(f"⚠️  Reducing batch size from {original_batch_size} to {batch_size} for self-attention model")
             print(f"   New effective batch size: {batch_size * args.gradient_accumulation_steps}")
-            
-            # Recreate dataloaders with smaller batch size
-            train_dataloader = DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                shuffle=True,
-                num_workers=4,
-                pin_memory=True if device != "cpu" else False,
-                persistent_workers=True,
-                prefetch_factor=2
-            )
-            
-            val_dataloader = DataLoader(
-                val_dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=4,
-                pin_memory=True if device != "cpu" else False,
-                persistent_workers=True,
-                prefetch_factor=2
-            )
-        
-        model = ImageCaptioningModelSelfAttention()
     else:
         print("\n*** Using CROSS-ATTENTION model ***\n")
         model = ImageCaptioningModel()
     
+    # Create datasets with the model's tokenizer
     train_dataset = FlickrDataset(
         root_dir=data_dir,
         split="train",
@@ -2038,6 +2020,7 @@ def main():
         transform=image_transforms
     )
     
+    # Create dataloaders
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
