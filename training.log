@@ -1,0 +1,37 @@
+wandb: Appending key for api.wandb.ai to your netrc file: /Users/admin/.netrc
+wandb: Currently logged in as: mrparracho (mrparracho-mlx) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.21.0
+wandb: Run data is saved locally in /Users/admin/git/mlx-week-4/wandb/run-20250703_122618-fm25prv7
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run local-exp
+wandb: ⭐️ View project at https://wandb.ai/mrparracho-mlx/image-captioning
+wandb: 🚀 View run at https://wandb.ai/mrparracho-mlx/image-captioning/runs/fm25prv7
+Downloading NLTK wordnet corpus...
+Using device: mps
+Batch size: 32
+Number of epochs: 20
+Learning rate: 0.0001
+Evaluation metrics: Enabled
+Loaded 400 samples for train split
+Loaded 100 samples for val split
+Loaded 400 samples for train split
+Training samples: 400
+Validation samples: 100
+Test samples: 400
+Testing during training: Enabled
+Test metrics: Enabled
+Test samples per epoch: 3
+Using WANDB_API_KEY from environment variable
+✅ W&B logging initialized: https://wandb.ai/mrparracho-mlx/image-captioning/runs/fm25prv7
+
+🔄 Starting Epoch 1/20
+📊 Current best_metrics: {}
+Epoch 1/20:   0%|          | 0/13 [00:00<?, ?it/s]/Users/admin/git/mlx-week-4/.venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:683: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, then device pinned memory won't be used.
+  warnings.warn(warn_msg)
+`loss_type=None` was set in the config but it is unrecognised.Using the default loss: `ForCausalLMLoss`.
+Epoch 1/20:   0%|          | 0/13 [00:14<?, ?it/s, loss=9.8588, avg_loss=9.8588]Epoch 1/20:   8%|▊         | 1/13 [00:14<02:57, 14.76s/it, loss=9.8588, avg_loss=9.8588]Downloading NLTK wordnet corpus...
+Downloading NLTK wordnet corpus...
+Downloading NLTK wordnet corpus...
+Downloading NLTK wordnet corpus...
+/Users/admin/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 21 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
