@@ -485,32 +485,46 @@ class ImageCaptioningModelSelfAttention(nn.Module):
         super().__init__()
         self.clip_vision_encoder = CLIPVisionModel.from_pretrained(clip_model_name)
         self.clip_processor = CLIPImageProcessor.from_pretrained(clip_model_name)
+        
+        # Freeze CLIP encoder
         for param in self.clip_vision_encoder.parameters():
             param.requires_grad = False
+        
         self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
         self.tokenizer.pad_token = self.tokenizer.eos_token
         if self.tokenizer.bos_token is None:
             self.tokenizer.bos_token = self.tokenizer.eos_token
+        
         # Add special tokens for image boundaries
         special_tokens = {"additional_special_tokens": ["<image>", "</image>"]}
         self.tokenizer.add_special_tokens(special_tokens)
+        
+        # Configure GPT-2 for self-attention
         config = GPT2Config.from_pretrained('gpt2')
-        config.add_cross_attention = False
+        config.add_cross_attention = False  # Use self-attention only
         config.n_positions = max_seq_length
         config.loss_type = "causal_lm"
+        
         self.decoder = GPT2LMHeadModel(config)
         self.decoder.resize_token_embeddings(len(self.tokenizer))
+        
+        # Projection layer to match dimensions if needed
         clip_hidden_size = self.clip_vision_encoder.config.hidden_size
         gpt_hidden_size = self.decoder.config.hidden_size
+        
         if clip_hidden_size != gpt_hidden_size:
             self.projection = nn.Linear(clip_hidden_size, gpt_hidden_size)
         else:
             self.projection = nn.Identity()
+        
         self.max_seq_length = max_seq_length
         self.image_start_token_id = self.tokenizer.convert_tokens_to_ids("<image>")
         self.image_end_token_id = self.tokenizer.convert_tokens_to_ids("</image>")
+    
     def encode_images(self, images):
+        """Encode images using CLIP vision encoder."""
         device = next(self.parameters()).device
+        
         if isinstance(images, list):
             pil_images = images
             inputs = self.clip_processor(pil_images, return_tensors="pt")
@@ -528,113 +542,113 @@ class ImageCaptioningModelSelfAttention(nn.Module):
         else:
             inputs = self.clip_processor([images], return_tensors="pt")
             inputs = {k: v.to(device) for k, v in inputs.items()}
+        
         with torch.no_grad():
             outputs = self.clip_vision_encoder(**inputs)
+        
         image_embeds = outputs.last_hidden_state
         image_embeds = self.projection(image_embeds)
+        
         return image_embeds
+    
     def create_combined_embeddings(self, input_ids, image_embeds):
+        """Create combined embeddings of image and text tokens."""
         batch_size, seq_len = input_ids.shape
         device = input_ids.device
+        
+        # Get text embeddings
         text_embeds = self.decoder.transformer.wte(input_ids)
+        
+        # Concatenate image and text embeddings
         combined_embeds = torch.cat([image_embeds, text_embeds], dim=1)
+        
+        # Create attention mask: 1 for valid tokens, 0 for padding
         image_mask = torch.ones(batch_size, image_embeds.size(1), device=device)
         text_mask = (input_ids != self.tokenizer.pad_token_id).float()
         combined_attention_mask = torch.cat([image_mask, text_mask], dim=1)
-        text_start_idx = image_embeds.size(1)
-        return combined_embeds, combined_attention_mask, text_start_idx
-    def forward(self, images, input_ids, attention_mask=None, labels=None):
-        image_embeds = self.encode_images(images)
-        combined_embeds, combined_attention_mask, text_start_idx = self.create_combined_embeddings(input_ids, image_embeds)
-        batch_size, total_seq_len = combined_embeds.shape[:2]
-        device = combined_embeds.device
-        # Causal mask: text tokens can't attend to future text tokens
-        causal_mask = torch.triu(torch.ones(total_seq_len, total_seq_len, device=device), diagonal=1).bool()
-        for i in range(text_start_idx, total_seq_len):
-            causal_mask[i, i:] = True
-        combined_attention_mask = combined_attention_mask.unsqueeze(1).unsqueeze(2)
-        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
         
-        # Convert both masks to boolean for bitwise operations
-        combined_attention_mask = combined_attention_mask.bool()
-        final_attention_mask = combined_attention_mask & ~causal_mask
+        text_start_idx = image_embeds.size(1)
+        
+        return combined_embeds, combined_attention_mask, text_start_idx
+    
+    def forward(self, images, input_ids, attention_mask=None, labels=None):
+        """Forward pass for training."""
+        # Encode images
+        image_embeds = self.encode_images(images)
+        
+        # Create combined embeddings
+        combined_embeds, combined_attention_mask, text_start_idx = self.create_combined_embeddings(input_ids, image_embeds)
+        
+        # Prepare labels for the full sequence
         if labels is not None:
+            batch_size = combined_embeds.size(0)
+            total_seq_len = combined_embeds.size(1)
+            device = combined_embeds.device
+            
+            # Create padded labels: -100 for image tokens, actual labels for text tokens
             padded_labels = torch.full((batch_size, total_seq_len), -100, device=device, dtype=labels.dtype)
             padded_labels[:, text_start_idx:text_start_idx + labels.size(1)] = labels
         else:
             padded_labels = None
-        hidden_states = combined_embeds
-        for layer in self.decoder.transformer.h:
-            hidden_states = layer.ln_1(hidden_states)
-            attn_output = layer.attn(
-                hidden_states,
-                attention_mask=final_attention_mask,
-                head_mask=None,
-                output_attentions=False
-            )[0]
-            hidden_states = hidden_states + attn_output
-            hidden_states = layer.ln_2(hidden_states)
-            mlp_output = layer.mlp(hidden_states)
-            hidden_states = hidden_states + mlp_output
-        hidden_states = self.decoder.transformer.ln_f(hidden_states)
-        text_hidden_states = hidden_states[:, text_start_idx:, :]
-        logits = self.decoder.lm_head(text_hidden_states)
-        if padded_labels is not None:
-            text_labels = padded_labels[:, text_start_idx:]
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(logits.view(-1, logits.size(-1)), text_labels.reshape(-1))
-        else:
-            loss = None
-        return type('Outputs', (), {
-            'loss': loss,
-            'logits': logits,
-            'hidden_states': hidden_states
-        })()
+        
+        # Use the decoder's efficient forward pass
+        outputs = self.decoder(
+            inputs_embeds=combined_embeds,
+            attention_mask=combined_attention_mask,
+            labels=padded_labels,
+            return_dict=True
+        )
+        
+        return outputs
+    
     def generate_caption(self, image, max_length=50, num_beams=5, temperature=0.8):
+        """Generate caption for a single image."""
         self.eval()
+        
+        # Encode image
         image_embeds = self.encode_images(image)
+        
+        # Start with image start token
         input_ids = torch.tensor([[self.image_start_token_id]], device=next(self.parameters()).device)
+        
         with torch.no_grad():
             generated_ids = self._generate_with_self_attention(image_embeds, input_ids, max_length, temperature)
+        
+        # Decode caption
         caption = self.tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return caption
+    
     def _generate_with_self_attention(self, image_embeds, input_ids, max_length, temperature):
+        """Generate tokens using self-attention."""
         batch_size = image_embeds.size(0)
         device = image_embeds.device
+        
         for step in range(max_length):
+            # Create combined embeddings
             combined_embeds, combined_attention_mask, text_start_idx = self.create_combined_embeddings(input_ids, image_embeds)
-            batch_size, total_seq_len = combined_embeds.shape[:2]
-            causal_mask = torch.triu(torch.ones(total_seq_len, total_seq_len, device=device), diagonal=1).bool()
-            for i in range(text_start_idx, total_seq_len):
-                causal_mask[i, i:] = True
-            combined_attention_mask_ = combined_attention_mask.unsqueeze(1).unsqueeze(2)
-            causal_mask_ = causal_mask.unsqueeze(0).unsqueeze(0)
             
-            # Convert both masks to boolean for bitwise operations
-            combined_attention_mask_ = combined_attention_mask_.bool()
-            final_attention_mask = combined_attention_mask_ & ~causal_mask_
-            hidden_states = combined_embeds
-            for layer in self.decoder.transformer.h:
-                hidden_states = layer.ln_1(hidden_states)
-                attn_output = layer.attn(
-                    hidden_states,
-                    attention_mask=final_attention_mask,
-                    head_mask=None,
-                    output_attentions=False
-                )[0]
-                hidden_states = hidden_states + attn_output
-                hidden_states = layer.ln_2(hidden_states)
-                mlp_output = layer.mlp(hidden_states)
-                hidden_states = hidden_states + mlp_output
-            hidden_states = self.decoder.transformer.ln_f(hidden_states)
-            text_hidden_states = hidden_states[:, text_start_idx:, :]
-            logits = self.decoder.lm_head(text_hidden_states)
+            # Use decoder's forward pass
+            outputs = self.decoder(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_attention_mask,
+                return_dict=True
+            )
+            
+            # Get logits for the last text token
+            logits = outputs.logits[:, text_start_idx:, :]
             next_token_logits = logits[:, -1, :] / temperature
+            
+            # Sample next token
             probs = torch.softmax(next_token_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
+            
+            # Append to input_ids
             input_ids = torch.cat([input_ids, next_token], dim=-1)
+            
+            # Stop if EOS token is generated
             if (next_token == self.tokenizer.eos_token_id).any():
                 break
+        
         return input_ids
 
 
@@ -1497,11 +1511,13 @@ def train_model_self_attention(
     use_wandb: bool = False,
     wandb_project: str = "image-captioning-self-attn",
     wandb_run_name: str | None = None,
-    eval_strategy: str = "meteor-centric"
+    eval_strategy: str = "meteor-centric",
+    gradient_accumulation_steps: int = 4  # New parameter for gradient accumulation
 ):
     """
-    Train the self-attention image captioning model.
+    Train the self-attention image captioning model with gradient accumulation.
     """
+    # Initialize wandb if requested
     wandb_initialized = False
     if use_wandb:
         config = {
@@ -1509,6 +1525,8 @@ def train_model_self_attention(
             "num_epochs": num_epochs,
             "learning_rate": learning_rate,
             "batch_size": train_dataloader.batch_size,
+            "effective_batch_size": train_dataloader.batch_size * gradient_accumulation_steps,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
             "device": device,
             "compute_eval_metrics": compute_eval_metrics,
             "test_samples_per_epoch": test_samples_per_epoch,
@@ -1519,19 +1537,32 @@ def train_model_self_attention(
             run_name=wandb_run_name,
             config=config
         )
+    
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.decoder.parameters(), lr=learning_rate)
+    
     os.makedirs(save_dir, exist_ok=True)
+    
     best_val_loss = float('inf')
     best_metrics = {}
     global_step = 0
+    
+    print(f"🚀 Starting self-attention training with gradient accumulation")
+    print(f"   Batch size: {train_dataloader.batch_size}")
+    print(f"   Gradient accumulation steps: {gradient_accumulation_steps}")
+    print(f"   Effective batch size: {train_dataloader.batch_size * gradient_accumulation_steps}")
+    
     for epoch in range(num_epochs):
         print(f"\n🔄 Starting Epoch {epoch+1}/{num_epochs}")
         print(f"📊 Current best_metrics: {best_metrics}")
+        
         model.train()
         total_loss = 0
         num_batches = 0
+        accumulated_loss = 0
+        
         progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
+        
         for batch_idx, (images, captions, caption_tokens) in enumerate(progress_bar):
             # Prepare captions for self-attention model
             if caption_tokens is None:
@@ -1560,28 +1591,52 @@ def train_model_self_attention(
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
             
+            # Forward pass
             outputs = model(images, input_ids, attention_mask, labels=input_ids)
             loss = outputs.loss
             
-            optimizer.zero_grad()
+            # Scale loss for gradient accumulation
+            loss = loss / gradient_accumulation_steps
+            
+            # Backward pass
             loss.backward()
+            
+            accumulated_loss += loss.item() * gradient_accumulation_steps
+            
+            # Update weights every gradient_accumulation_steps
+            if (batch_idx + 1) % gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                
+                # Log accumulated loss
+                total_loss += accumulated_loss
+                num_batches += 1
+                global_step += 1
+                
+                # Log to wandb every 32 effective batches (128 actual batches with accumulation=4)
+                if wandb_initialized and global_step % 32 == 0:
+                    log_to_wandb({
+                        "train/loss": accumulated_loss,
+                        "train/avg_loss": total_loss / num_batches,
+                        "train/learning_rate": learning_rate,
+                        "train/effective_batch_size": train_dataloader.batch_size * gradient_accumulation_steps,
+                    }, step=global_step)
+                
+                # Update progress bar
+                progress_bar.set_postfix({
+                    'loss': f'{accumulated_loss:.4f}',
+                    'avg_loss': f'{total_loss/num_batches:.4f}',
+                    'effective_batch': f'{train_dataloader.batch_size * gradient_accumulation_steps}'
+                })
+                
+                accumulated_loss = 0
+        
+        # Handle remaining gradients if any
+        if accumulated_loss > 0:
             optimizer.step()
-            
-            total_loss += loss.item()
+            optimizer.zero_grad()
+            total_loss += accumulated_loss
             num_batches += 1
-            global_step += 1
-            
-            if wandb_initialized and global_step % 128 == 0:
-                log_to_wandb({
-                    "train/loss": loss.item(),
-                    "train/avg_loss": total_loss / num_batches,
-                    "train/learning_rate": learning_rate,
-                }, step=global_step)
-            
-            progress_bar.set_postfix({
-                'loss': f'{loss.item():.4f}',
-                'avg_loss': f'{total_loss/num_batches:.4f}'
-            })
         
         avg_train_loss = total_loss / num_batches
         print(f"Epoch {epoch+1}/{num_epochs} - Average Training Loss: {avg_train_loss:.4f}")
@@ -1592,6 +1647,7 @@ def train_model_self_attention(
                 "train/epoch_loss": avg_train_loss,
             }, step=global_step)
         
+        # Validation
         if val_dataloader is not None:
             model.eval()
             val_loss = 0
@@ -1637,6 +1693,7 @@ def train_model_self_attention(
                     "val/loss": avg_val_loss,
                 }, step=global_step)
             
+            # Compute evaluation metrics if requested
             eval_metrics = {}
             if compute_eval_metrics and val_dataloader is not None:
                 eval_metrics = evaluate_model_on_validation_self_attention(
@@ -1649,11 +1706,15 @@ def train_model_self_attention(
                 if wandb_initialized:
                     log_to_wandb(eval_metrics, step=global_step, prefix="eval")
                 
+                # Check for evaluation-based improvement
                 should_save_eval, reason = determine_model_save(eval_metrics, best_metrics, eval_strategy)
+                
                 if should_save_eval:
                     best_metrics = eval_metrics.copy()
                     print(f"✅ New best model based on {eval_strategy}! Reason: {reason}")
                     print(f"📊 Updated best_metrics: {best_metrics}")
+                    
+                    # Save evaluation-based best model
                     eval_save_dict = {
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
@@ -1665,11 +1726,13 @@ def train_model_self_attention(
                     }
                     torch.save(eval_save_dict, os.path.join(save_dir, 'best_model_eval_self_attn.pth'))
                     print(f"Saved best model based on {eval_strategy} evaluation")
+                    
                     if wandb_initialized:
                         for metric_name, score in eval_metrics.items():
                             log_to_wandb({
                                 f"best/{metric_name.lower()}": score,
                             }, step=global_step)
+                        
                         checkpoint_path = os.path.join(save_dir, 'best_model_eval_self_attn.pth')
                         log_model_checkpoint_to_wandb(
                             checkpoint_path=checkpoint_path,
@@ -1682,10 +1745,13 @@ def train_model_self_attention(
                 else:
                     print(f"❌ No evaluation-based improvement. Reason: {reason}")
             
+            # Always check for loss-based improvement and save if better
             loss_improved = avg_val_loss < best_val_loss
             if loss_improved:
                 best_val_loss = avg_val_loss
                 print(f"New best validation loss: {avg_val_loss:.4f}")
+                
+                # Save loss-based best model
                 loss_save_dict = {
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
@@ -1696,10 +1762,12 @@ def train_model_self_attention(
                 }
                 torch.save(loss_save_dict, os.path.join(save_dir, 'best_model_loss_self_attn.pth'))
                 print(f"Saved best model based on validation loss: {avg_val_loss:.4f}")
+                
                 if wandb_initialized:
                     log_to_wandb({
                         "best/val_loss": best_val_loss,
                     }, step=global_step)
+                    
                     checkpoint_path = os.path.join(save_dir, 'best_model_loss_self_attn.pth')
                     log_model_checkpoint_to_wandb(
                         checkpoint_path=checkpoint_path,
@@ -1709,6 +1777,7 @@ def train_model_self_attention(
                         step=global_step
                     )
         
+        # Save checkpoint every few epochs
         if (epoch + 1) % 5 == 0:
             checkpoint_path = os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}_self_attn.pth')
             torch.save({
@@ -1717,6 +1786,7 @@ def train_model_self_attention(
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': avg_train_loss,
             }, checkpoint_path)
+            
             if wandb_initialized:
                 log_model_checkpoint_to_wandb(
                     checkpoint_path=checkpoint_path,
@@ -1726,6 +1796,7 @@ def train_model_self_attention(
                     step=global_step
                 )
         
+        # Test on random samples after each epoch
         if test_dataset and test_samples_per_epoch > 0:
             test_results, test_samples = test_model_on_random_samples_during_training_self_attention(
                 model, test_dataset, device, test_samples_per_epoch, 
@@ -1863,7 +1934,11 @@ def main():
                        choices=["weighted-composite", "pareto", "multi-criteria", "meteor-centric", "bleu", "rouge", "meteor"],
                        help="Evaluation strategy for model saving")
     parser.add_argument("--self-attn", action="store_true", help="Use self-attention model instead of cross-attention")
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=4, 
+                       help="Number of gradient accumulation steps (for self-attention to reduce memory usage)")
+    
     args = parser.parse_args()
+    
     # Get values from environment variables if not provided
     if args.save_to_hf is None:
         args.save_to_hf = os.environ.get('HF_REPO_NAME')
@@ -1879,50 +1954,90 @@ def main():
         args.wandb_run_name = os.environ.get('WANDB_RUN_NAME')
     if args.wandb_project is None:
         args.wandb_project = "image-captioning"
+    
     data_dir = args.data_dir
     batch_size = args.batch_size
     num_epochs = args.num_epochs
     learning_rate = args.learning_rate
     device = args.device if args.device else select_device()
     compute_eval_metrics = not args.no_eval
+    
     print(f"Using device: {device}")
     print(f"Batch size: {batch_size}")
     print(f"Number of epochs: {num_epochs}")
     print(f"Learning rate: {learning_rate}")
     print(f"Evaluation metrics: {'Enabled' if compute_eval_metrics else 'Disabled'}")
+    
     if not os.path.exists(data_dir):
         print("Creating sample Flickr dataset...")
         create_sample_flickr_data(data_dir, num_samples=100)
         print("Please add actual images to the dataset before training!")
         return
+    
     image_transforms = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
+    
     if args.self_attn:
         print("\n*** Using SELF-ATTENTION model ***\n")
+        print(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
+        print(f"Effective batch size: {batch_size * args.gradient_accumulation_steps}")
+        
+        # Automatically reduce batch size for self-attention to prevent OOM
+        if batch_size > 8:
+            original_batch_size = batch_size
+            batch_size = min(8, batch_size // 2)
+            print(f"⚠️  Reducing batch size from {original_batch_size} to {batch_size} for self-attention model")
+            print(f"   New effective batch size: {batch_size * args.gradient_accumulation_steps}")
+            
+            # Recreate dataloaders with smaller batch size
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=4,
+                pin_memory=True if device != "cpu" else False,
+                persistent_workers=True,
+                prefetch_factor=2
+            )
+            
+            val_dataloader = DataLoader(
+                val_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=4,
+                pin_memory=True if device != "cpu" else False,
+                persistent_workers=True,
+                prefetch_factor=2
+            )
+        
         model = ImageCaptioningModelSelfAttention()
     else:
         print("\n*** Using CROSS-ATTENTION model ***\n")
         model = ImageCaptioningModel()
+    
     train_dataset = FlickrDataset(
         root_dir=data_dir,
         split="train",
         tokenizer=model.tokenizer,
         transform=image_transforms
     )
+    
     val_dataset = FlickrDataset(
         root_dir=data_dir,
         split="val",
         tokenizer=model.tokenizer,
         transform=image_transforms
     )
+    
     test_dataset = FlickrDataset(
         root_dir=data_dir,
         split="train",
         tokenizer=model.tokenizer,
         transform=image_transforms
     )
+    
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -1932,6 +2047,7 @@ def main():
         persistent_workers=True,
         prefetch_factor=2
     )
+    
     val_dataloader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -1941,6 +2057,7 @@ def main():
         persistent_workers=True,
         prefetch_factor=2
     )
+    
     print(f"Training samples: {len(train_dataset)}")
     print(f"Validation samples: {len(val_dataset)}")
     print(f"Test samples: {len(test_dataset)}")
@@ -1948,6 +2065,7 @@ def main():
     if not args.no_test:
         print(f"Test metrics: {'Enabled' if not args.no_test_metrics else 'Disabled'}")
         print(f"Test samples per epoch: {args.test_samples_per_epoch}")
+    
     if args.self_attn:
         train_model_self_attention(
             model=model,
@@ -1963,7 +2081,8 @@ def main():
             use_wandb=args.wandb,
             wandb_project=args.wandb_project,
             wandb_run_name=args.wandb_run_name,
-            eval_strategy=args.eval_strategy
+            eval_strategy=args.eval_strategy,
+            gradient_accumulation_steps=args.gradient_accumulation_steps
         )
         print("Self-attention training completed!")
     else:
@@ -1984,6 +2103,7 @@ def main():
             eval_strategy=args.eval_strategy
         )
         print("Cross-attention training completed!")
+    
     if args.save_to_hf:
         if args.self_attn:
             print(f"\n🔄 Saving self-attention model to Hugging Face Hub: {args.save_to_hf}")
