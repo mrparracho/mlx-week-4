@@ -1,0 +1,63 @@
+program: sweep_agent.py
+method: grid
+name: "self_attn_vs_cross_attn_quick_test"
+description: "Quick comparison of self-attention vs cross-attention with 5 epochs, optimized batch sizes per model"
+
+parameters:
+  # Model architecture choice
+  model:
+    values:
+      - CLIP-GPT2-ImageCaptioning
+      - CLIP-GPT2-SelfAttention-ImageCaptioning
+    distribution: categorical
+  
+  # Learning rates to test
+  learning_rate:
+    values: [0.0001, 0.0005]  # 1e-4, 5e-4
+    distribution: categorical
+  
+  # Cross-attention: larger batches (more memory efficient)
+  batch_size_cross:
+    values: [32, 64]
+    distribution: categorical
+  
+  # Self-attention: smaller batches + accumulation (memory intensive)
+  batch_size_self:
+    values: [8, 16]
+    distribution: categorical
+  
+  # Gradient accumulation for self-attention
+  gradient_accumulation_steps:
+    values: [1, 4]
+    distribution: categorical
+  
+  # Fixed parameters for all runs
+  num_epochs:
+    value: 5
+    distribution: constant
+  
+  test_samples_per_epoch:
+    value: 3
+    distribution: constant
+  
+  compute_eval_metrics:
+    value: "true"
+    distribution: constant
+  
+  eval_strategy:
+    value: "meteor-centric"
+    distribution: constant
+  
+  device:
+    value: "cuda"
+    distribution: constant
+
+# Metric to optimize
+metric:
+  name: "eval/meteor"
+  goal: maximize
+
+# Early termination
+early_terminate:
+  type: hyperband
+  min_iter: 1

@@ -685,7 +685,7 @@ def train_model(
     eval_strategy: str = "meteor-centric"
 ):
     """
-    Train the image captioning model.
+    Train the image captioning model with dynamic wandb logging.
     """
     # Initialize wandb if requested
     wandb_initialized = False
@@ -716,6 +716,18 @@ def train_model(
     best_bleu_score = 0.0
     best_metrics = {}
     global_step = 0
+    
+    # Calculate dynamic logging frequency based on dataset size
+    total_samples = len(train_dataloader.dataset)
+    batch_size = train_dataloader.batch_size
+    total_batches_per_epoch = len(train_dataloader)
+    
+    # Target: log 20 times per epoch regardless of batch size
+    target_logs_per_epoch = 20
+    log_every_n_batches = max(1, total_batches_per_epoch // target_logs_per_epoch)
+    
+    print(f"📊 Dataset info: {total_samples} samples, {total_batches_per_epoch} batches per epoch")
+    print(f"📈 Dynamic logging: every {log_every_n_batches} batches (target: {target_logs_per_epoch} logs per epoch)")
     
     for epoch in range(num_epochs):
         print(f"\n🔄 Starting Epoch {epoch+1}/{num_epochs}")
@@ -760,18 +772,21 @@ def train_model(
             num_batches += 1
             global_step += 1
             
-            # Log to wandb every 128 batches
-            if wandb_initialized and global_step % 128 == 0:
+            # Dynamic logging based on dataset size
+            if wandb_initialized and (batch_idx + 1) % log_every_n_batches == 0:
                 log_to_wandb({
                     "train/loss": loss.item(),
                     "train/avg_loss": total_loss / num_batches,
                     "train/learning_rate": learning_rate,
+                    "train/batch_size": batch_size,
+                    "train/total_samples": total_samples,
                 }, step=global_step)
             
             # Update progress bar
             progress_bar.set_postfix({
                 'loss': f'{loss.item():.4f}',
-                'avg_loss': f'{total_loss/num_batches:.4f}'
+                'avg_loss': f'{total_loss/num_batches:.4f}',
+                'log_every': log_every_n_batches
             })
         
         avg_train_loss = total_loss / num_batches
@@ -793,27 +808,18 @@ def train_model(
             with torch.no_grad():
                 for images, captions, caption_tokens in val_dataloader:
                     if caption_tokens is None:
-                        input_ids, attention_mask = prepare_captions_for_self_attention(
-                            captions, model.tokenizer, max_text_length=77
+                        tokenized = model.tokenizer(
+                            captions,
+                            padding=True,
+                            truncation=True,
+                            max_length=77,
+                            return_tensors="pt"
                         )
+                        input_ids = tokenized.input_ids
+                        attention_mask = tokenized.attention_mask
                     else:
-                        # Convert pre-tokenized captions back to text and re-tokenize with image tokens
-                        try:
-                            # Decode the pre-tokenized captions back to text
-                            decoded_captions = []
-                            for token_ids in caption_tokens:
-                                # Remove padding tokens and decode
-                                clean_tokens = [tid for tid in token_ids if tid != model.tokenizer.pad_token_id]
-                                decoded_text = model.tokenizer.decode(clean_tokens, skip_special_tokens=True)
-                                decoded_captions.append(decoded_text)
-                            
-                            # Re-tokenize with image tokens
-                            input_ids, attention_mask = prepare_captions_for_self_attention(
-                                decoded_captions, model.tokenizer, max_text_length=77
-                            )
-                        except Exception as e:
-                            print(f"Warning: Failed to process pre-tokenized captions in validation: {e}")
-                            continue
+                        input_ids = caption_tokens
+                        attention_mask = torch.ones_like(input_ids)
                     
                     input_ids = input_ids.to(device)
                     attention_mask = attention_mask.to(device)
@@ -850,8 +856,6 @@ def train_model(
                     best_metrics = eval_metrics.copy()
                     print(f"✅ New best model based on {eval_strategy}! Reason: {reason}")
                     print(f"📊 Updated best_metrics: {best_metrics}")
-                else:
-                    print(f"❌ No evaluation-based improvement. Reason: {reason}")
                     
                     # Save evaluation-based best model
                     eval_save_dict = {
@@ -883,6 +887,8 @@ def train_model(
                             eval_metrics=eval_metrics,
                             step=global_step
                         )
+                else:
+                    print(f"❌ No evaluation-based improvement. Reason: {reason}")
             
             # Always check for loss-based improvement and save if better
             loss_improved = avg_val_loss < best_val_loss
@@ -1515,7 +1521,7 @@ def train_model_self_attention(
     gradient_accumulation_steps: int = 4  # New parameter for gradient accumulation
 ):
     """
-    Train the self-attention image captioning model with gradient accumulation.
+    Train the self-attention image captioning model with gradient accumulation and dynamic wandb logging.
     """
     # Initialize wandb if requested
     wandb_initialized = False
@@ -1540,22 +1546,32 @@ def train_model_self_attention(
     
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.decoder.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss(ignore_index=model.tokenizer.eos_token_id)
     
     os.makedirs(save_dir, exist_ok=True)
     
     best_val_loss = float('inf')
+    best_bleu_score = 0.0
     best_metrics = {}
     global_step = 0
     
-    print(f"🚀 Starting self-attention training with gradient accumulation")
-    print(f"   Batch size: {train_dataloader.batch_size}")
-    print(f"   Gradient accumulation steps: {gradient_accumulation_steps}")
-    print(f"   Effective batch size: {train_dataloader.batch_size * gradient_accumulation_steps}")
+    # Calculate dynamic logging frequency based on dataset size
+    total_samples = len(train_dataloader.dataset)
+    batch_size = train_dataloader.batch_size
+    total_batches_per_epoch = len(train_dataloader)
+    effective_batch_size = batch_size * gradient_accumulation_steps
+    
+    # Target: log 20 times per epoch regardless of batch size or accumulation
+    target_logs_per_epoch = 20
+    log_every_n_effective_batches = max(1, total_batches_per_epoch // target_logs_per_epoch)
+    
+    print(f"📊 Dataset info: {total_samples} samples, {total_batches_per_epoch} batches per epoch")
+    print(f"📈 Dynamic logging: every {log_every_n_effective_batches} effective batches (target: {target_logs_per_epoch} logs per epoch)")
+    print(f"🔄 Gradient accumulation: {gradient_accumulation_steps} steps (effective batch: {effective_batch_size})")
     
     for epoch in range(num_epochs):
         print(f"\n🔄 Starting Epoch {epoch+1}/{num_epochs}")
         print(f"📊 Current best_metrics: {best_metrics}")
-        
         model.train()
         total_loss = 0
         num_batches = 0
@@ -1588,6 +1604,7 @@ def train_model_self_attention(
                     print(f"Warning: Failed to process pre-tokenized captions: {e}")
                     continue
             
+            # Move to device
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
             
@@ -1613,20 +1630,24 @@ def train_model_self_attention(
                 num_batches += 1
                 global_step += 1
                 
-                # Log to wandb every 32 effective batches (128 actual batches with accumulation=4)
-                if wandb_initialized and global_step % 32 == 0:
+                # Dynamic logging based on dataset size (not fixed batch count)
+                if wandb_initialized and num_batches % log_every_n_effective_batches == 0:
                     log_to_wandb({
                         "train/loss": accumulated_loss,
                         "train/avg_loss": total_loss / num_batches,
                         "train/learning_rate": learning_rate,
-                        "train/effective_batch_size": train_dataloader.batch_size * gradient_accumulation_steps,
+                        "train/batch_size": batch_size,
+                        "train/effective_batch_size": effective_batch_size,
+                        "train/total_samples": total_samples,
+                        "train/gradient_accumulation_steps": gradient_accumulation_steps,
                     }, step=global_step)
                 
                 # Update progress bar
                 progress_bar.set_postfix({
                     'loss': f'{accumulated_loss:.4f}',
                     'avg_loss': f'{total_loss/num_batches:.4f}',
-                    'effective_batch': f'{train_dataloader.batch_size * gradient_accumulation_steps}'
+                    'effective_batch': f'{effective_batch_size}',
+                    'log_every': log_every_n_effective_batches
                 })
                 
                 accumulated_loss = 0
@@ -1806,12 +1827,15 @@ def train_model_self_attention(
             for metric_name, score in test_results.items():
                 print(f"  {metric_name}: {score:.4f}")
             
+            # Log test metrics to wandb
             if wandb_initialized and test_results:
                 log_to_wandb(test_results, step=global_step, prefix="test")
             
+            # Log test images to wandb
             if wandb_initialized and test_samples:
                 log_test_images_to_wandb(test_samples, epoch + 1, global_step)
     
+    # Finish wandb run
     if wandb_initialized:
         finish_wandb()
 
