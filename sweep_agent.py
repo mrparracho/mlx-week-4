@@ -48,6 +48,7 @@ def train():
     # Build the command
     cmd = [
         "python", script_name,
+        "--data-dir", "data/flickr30k",  # Add the required data directory
         "--batch-size", str(batch_size),
         "--num-epochs", str(config.num_epochs),
         "--learning-rate", str(config.learning_rate),
@@ -56,7 +57,6 @@ def train():
         "--test-samples-per-epoch", str(config.test_samples_per_epoch),
         "--gradient-accumulation-steps", str(gradient_accumulation_steps),
         "--wandb",
-        "--eval",  # Always compute eval metrics
     ]
     
     # Add self-attention flag if needed
@@ -91,13 +91,22 @@ def train():
     
     # Run the training command
     try:
+        # Add the project root to Python path
+        env = os.environ.copy()
+        project_root = str(Path(__file__).parent)
+        if 'PYTHONPATH' in env:
+            env['PYTHONPATH'] = f"{project_root}:{env['PYTHONPATH']}"
+        else:
+            env['PYTHONPATH'] = project_root
+        
         # Run the command and capture output
         result = subprocess.run(
             cmd, 
             check=True, 
             capture_output=True, 
             text=True,
-            cwd=Path(__file__).parent  # Run from project root
+            cwd=Path(__file__).parent,  # Run from project root
+            env=env
         )
         
         print("✅ Training completed successfully!")

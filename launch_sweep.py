@@ -32,9 +32,9 @@ def launch_sweep():
         print(f"❌ Login failed: {e}")
         return
     
-    # Use a simple project name that likely exists or can be created
-    project_name = "mlx-week-4"
-    entity_name = "mrparracho"
+    # Use the same project name as the training scripts
+    project_name = "image-captioning"
+    entity_name = "mrparracho-mlx"
     
     print(f"🔍 Using project: {entity_name}/{project_name}")
     
@@ -59,7 +59,7 @@ def launch_sweep():
         print(f"   - Dynamic wandb logging: 20 logs per epoch regardless of batch size")
         
         # Launch the sweep agent
-        wandb.agent(sweep_id, function=train_from_sweep_agent, count=None)
+        wandb.agent(sweep_id, function=train_from_sweep_agent, count=None, project=project_name, entity=entity_name)
         
         print("✅ Sweep completed!")
         
