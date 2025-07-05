@@ -20,7 +20,51 @@ def load_model(checkpoint_path, device):
 def load_model_self(checkpoint_path, device):
     model = ImageCaptioningModelSelf(decoder_mode='self_attention')
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Handle the case where checkpoint is from cross-attention model but we want self-attention
+    checkpoint_state_dict = checkpoint['model_state_dict']
+    model_state_dict = model.state_dict()
+    
+    # Filter out keys that don't exist in the model (like transformer_encoder layers)
+    filtered_checkpoint = {}
+    for key, value in checkpoint_state_dict.items():
+        if key in model_state_dict:
+            # Handle size mismatches for embedding layers
+            if key == 'decoder.transformer.wte.weight' and value.shape[0] != model_state_dict[key].shape[0]:
+                # Truncate or pad the embedding weights to match
+                target_size = model_state_dict[key].shape[0]
+                if value.shape[0] > target_size:
+                    filtered_checkpoint[key] = value[:target_size, :]
+                else:
+                    # Pad with zeros
+                    padded = torch.zeros(target_size, value.shape[1], dtype=value.dtype, device=value.device)
+                    padded[:value.shape[0], :] = value
+                    filtered_checkpoint[key] = padded
+            elif key == 'decoder.transformer.wpe.weight' and value.shape[0] != model_state_dict[key].shape[0]:
+                # Handle positional embedding size mismatch
+                target_size = model_state_dict[key].shape[0]
+                if value.shape[0] > target_size:
+                    filtered_checkpoint[key] = value[:target_size, :]
+                else:
+                    # Pad with zeros
+                    padded = torch.zeros(target_size, value.shape[1], dtype=value.dtype, device=value.device)
+                    padded[:value.shape[0], :] = value
+                    filtered_checkpoint[key] = padded
+            elif key == 'decoder.lm_head.weight' and value.shape[0] != model_state_dict[key].shape[0]:
+                # Handle LM head size mismatch
+                target_size = model_state_dict[key].shape[0]
+                if value.shape[0] > target_size:
+                    filtered_checkpoint[key] = value[:target_size, :]
+                else:
+                    # Pad with zeros
+                    padded = torch.zeros(target_size, value.shape[1], dtype=value.dtype, device=value.device)
+                    padded[:value.shape[0], :] = value
+                    filtered_checkpoint[key] = padded
+            else:
+                filtered_checkpoint[key] = value
+    
+    # Load the filtered checkpoint
+    model.load_state_dict(filtered_checkpoint, strict=False)
     model = model.to(device)
     model.eval()
     return model

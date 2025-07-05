@@ -8,6 +8,60 @@ from src.data.flickr_dataset import FlickrDataset
 from torchvision import transforms
 import random
 
+# Pre-download dependencies at startup
+@st.cache_resource
+def download_dependencies():
+    """Download all required dependencies at startup."""
+    with st.spinner("Downloading dependencies..."):
+        # Download NLTK data
+        try:
+            import nltk
+            nltk.download('punkt', quiet=True)
+            nltk.download('wordnet', quiet=True)
+            st.success("✅ NLTK data downloaded")
+        except Exception as e:
+            st.warning(f"⚠️ NLTK download failed: {e}")
+        
+        # Pre-download CLIP model
+        try:
+            from transformers import CLIPVisionModel, CLIPProcessor
+            CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True)
+            CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+            st.success("✅ CLIP model downloaded")
+        except Exception as e:
+            st.warning(f"⚠️ CLIP download failed: {e}")
+        
+        # Pre-download GPT-2 tokenizer
+        try:
+            from transformers import GPT2Tokenizer
+            GPT2Tokenizer.from_pretrained('gpt2')
+            st.success("✅ GPT-2 tokenizer downloaded")
+        except Exception as e:
+            st.warning(f"⚠️ GPT-2 download failed: {e}")
+        
+        # Pre-download Qwen model
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base", use_fast=True)
+            AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base")
+            st.success("✅ Qwen model downloaded")
+        except Exception as e:
+            st.warning(f"⚠️ Qwen download failed: {e}")
+
+# Download dependencies at startup
+download_dependencies()
+
+# Cache models to avoid reloading
+@st.cache_resource
+def load_cached_model(checkpoint_path, device, model_type, qwen_dir_param="Qwen/Qwen3-0.6B-Base"):
+    """Load and cache a model."""
+    if model_type == "cross":
+        return load_model(checkpoint_path, device)
+    elif model_type == "self":
+        return load_model_self(checkpoint_path, device)
+    elif model_type == "qwen":
+        return load_model_qwen(checkpoint_path, device, qwen_dir=qwen_dir_param)
+
 st.set_page_config(page_title="Image Captioning Comparison", layout="centered")
 st.title("🖼️ Image Captioning: Cross-Attention vs Self-Attention vs Qwen")
 
@@ -15,8 +69,8 @@ st.title("🖼️ Image Captioning: Cross-Attention vs Self-Attention vs Qwen")
 st.sidebar.header("Model & Generation Settings")
 
 default_ckpt_cross = "checkpoints/checkpoint_epoch_10.pth"
-default_ckpt_self = "checkpoints/best_model_eval.pth"
-default_ckpt_qwen = "checkpoints/model_6.pth"
+default_ckpt_self = "checkpoints/best_model_eval_self_attn.pth"
+default_ckpt_qwen = "checkpoints/best_model_qwen.pth"
 default_qwen_dir = "Qwen/Qwen3-0.6B-Base"
 ckpt_path_cross = st.sidebar.text_input("Cross-Attention checkpoint", value=default_ckpt_cross)
 ckpt_path_self = st.sidebar.text_input("Self-Attention checkpoint", value=default_ckpt_self)
@@ -49,7 +103,7 @@ with tab1:
         # Resize to half original size for display
         w, h = image.size
         image_disp = image.resize((w // 2, h // 2))
-        st.image(image_disp, caption="Uploaded Image (50%)", use_column_width=False)
+        st.image(image_disp, caption="Uploaded Image (50%)", use_container_width=False)
         selected_image = image
 
 with tab2:
@@ -76,7 +130,7 @@ with tab2:
                     img = transforms.ToPILImage()(img)
                 w, h = img.size
                 image_disp = img.resize((w // 2, h // 2))
-                st.image(image_disp, caption="Random Test Image (50%)", use_column_width=False)
+                st.image(image_disp, caption="Random Test Image (50%)", use_container_width=False)
                 selected_image = img
                 reference_caption = ref_caption
                 st.session_state["random_image"] = img
@@ -87,7 +141,7 @@ with tab2:
         img = st.session_state["random_image"]
         w, h = img.size
         image_disp = img.resize((w // 2, h // 2))
-        st.image(image_disp, caption="Random Test Image (50%)", use_column_width=False)
+        st.image(image_disp, caption="Random Test Image (50%)", use_container_width=False)
         st.markdown(f"**Reference Caption:** {st.session_state['random_caption']}")
         selected_image = img
         reference_caption = st.session_state["random_caption"]
@@ -100,10 +154,17 @@ if selected_image is not None:
     elif not os.path.exists(ckpt_path_qwen):
         st.error(f"Qwen checkpoint not found: {ckpt_path_qwen}")
     else:
-        with st.spinner("Generating captions with all models..."):
-            model_cross = load_model(ckpt_path_cross, device)
-            model_self = load_model_self(ckpt_path_self, device)
-            generate_caption_qwen = load_model_qwen(ckpt_path_qwen, device, qwen_dir=qwen_dir)
+        with st.spinner("Loading models..."):
+            model_cross = load_cached_model(ckpt_path_cross, device, "cross")
+            st.success("✅ Cross-attention model loaded")
+            
+            model_self = load_cached_model(ckpt_path_self, device, "self")
+            st.success("✅ Self-attention model loaded")
+            
+            generate_caption_qwen = load_cached_model(ckpt_path_qwen, device, "qwen", qwen_dir)
+            st.success("✅ Qwen model loaded")
+        
+        with st.spinner("Generating captions..."):
             caption_cross = model_cross.generate_caption(
                 selected_image,
                 max_length=max_length,
